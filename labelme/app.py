@@ -367,6 +367,13 @@ class MainWindow(QtWidgets.QMainWindow):
             self.tr("Start drawing linestrip. Ctrl+LeftClick ends creation."),
             enabled=False,
         )
+        createPolygonSAMMode = action(
+            self.tr("Create Polygons With Segment Anything"),
+            self.segmentAnything,
+            icon="objects",
+            tip=self.tr("Start creating polygons with segment anything"),
+            enabled=False,
+        )
         editMode = action(
             self.tr("Edit Polygons"),
             self.setEditMode,
@@ -603,6 +610,7 @@ class MainWindow(QtWidgets.QMainWindow):
             createLineMode=createLineMode,
             createPointMode=createPointMode,
             createLineStripMode=createLineStripMode,
+            createPolygonSAMMode=createPolygonSAMMode,
             zoom=zoom,
             zoomIn=zoomIn,
             zoomOut=zoomOut,
@@ -637,6 +645,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 createLineMode,
                 createPointMode,
                 createLineStripMode,
+                createPolygonSAMMode,
                 editMode,
                 edit,
                 duplicate,
@@ -655,6 +664,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 createLineMode,
                 createPointMode,
                 createLineStripMode,
+                createPolygonSAMMode,
                 editMode,
                 brightnessContrast,
             ),
@@ -852,6 +862,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.actions.createLineMode,
             self.actions.createPointMode,
             self.actions.createLineStripMode,
+            self.actions.createPolygonSAMMode,
             self.actions.editMode,
         )
         utils.addActions(self.menus.edit, actions + self.actions.editMenu)
@@ -960,6 +971,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.actions.createLineMode.setEnabled(True)
             self.actions.createPointMode.setEnabled(True)
             self.actions.createLineStripMode.setEnabled(True)
+            self.actions.createPolygonSAMMode.setEnabled(True)
         else:
             if createMode == "polygon":
                 self.actions.createMode.setEnabled(False)
@@ -968,6 +980,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.actions.createLineMode.setEnabled(True)
                 self.actions.createPointMode.setEnabled(True)
                 self.actions.createLineStripMode.setEnabled(True)
+                self.actions.createPolygonSAMMode.setEnabled(True)
             elif createMode == "rectangle":
                 self.actions.createMode.setEnabled(True)
                 self.actions.createRectangleMode.setEnabled(False)
@@ -975,6 +988,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.actions.createLineMode.setEnabled(True)
                 self.actions.createPointMode.setEnabled(True)
                 self.actions.createLineStripMode.setEnabled(True)
+                self.actions.createPolygonSAMMode.setEnabled(True)
             elif createMode == "line":
                 self.actions.createMode.setEnabled(True)
                 self.actions.createRectangleMode.setEnabled(True)
@@ -982,6 +996,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.actions.createLineMode.setEnabled(False)
                 self.actions.createPointMode.setEnabled(True)
                 self.actions.createLineStripMode.setEnabled(True)
+                self.actions.createPolygonSAMMode.setEnabled(True)
             elif createMode == "point":
                 self.actions.createMode.setEnabled(True)
                 self.actions.createRectangleMode.setEnabled(True)
@@ -989,6 +1004,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.actions.createLineMode.setEnabled(True)
                 self.actions.createPointMode.setEnabled(False)
                 self.actions.createLineStripMode.setEnabled(True)
+                self.actions.createPolygonSAMMode.setEnabled(True)
             elif createMode == "circle":
                 self.actions.createMode.setEnabled(True)
                 self.actions.createRectangleMode.setEnabled(True)
@@ -996,6 +1012,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.actions.createLineMode.setEnabled(True)
                 self.actions.createPointMode.setEnabled(True)
                 self.actions.createLineStripMode.setEnabled(True)
+                self.actions.createPolygonSAMMode.setEnabled(True)
             elif createMode == "linestrip":
                 self.actions.createMode.setEnabled(True)
                 self.actions.createRectangleMode.setEnabled(True)
@@ -1003,6 +1020,15 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.actions.createLineMode.setEnabled(True)
                 self.actions.createPointMode.setEnabled(True)
                 self.actions.createLineStripMode.setEnabled(False)
+                self.actions.createPolygonSAMMode.setEnabled(True)
+            elif createMode == "polygonSAM":
+                self.actions.createMode.setEnabled(True)
+                self.actions.createRectangleMode.setEnabled(True)
+                self.actions.createCircleMode.setEnabled(True)
+                self.actions.createLineMode.setEnabled(True)
+                self.actions.createPointMode.setEnabled(True)
+                self.actions.createLineStripMode.setEnabled(True)
+                self.actions.createPolygonSAMMode.setEnabled(False)
             else:
                 raise ValueError("Unsupported createMode: %s" % createMode)
         self.actions.editMode.setEnabled(not edit)
@@ -2079,3 +2105,17 @@ class MainWindow(QtWidgets.QMainWindow):
                     images.append(relativePath)
         images = natsort.os_sorted(images)
         return images
+
+    def segmentAnything(self,):
+        try:
+            import segment_anything
+            import appdirs
+            import torch
+            cachedir = appdirs.user_cache_dir(__appname__)
+            os.makedirs(cachedir, exist_ok=True)
+            if not os.path.isfile(os.path.join(cachedir, "vit-h-sam.pth")):
+                torch.hub.download_url_to_file("https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth", os.path.join(cachedir, "vit-h-sam.pth"))
+            self.toggleDrawMode(False, createMode="polygonSAM")
+            self.canvas.loadSamPredictor("default", "cuda", os.path.join(cachedir, "vit-h-sam.pth"))
+        except Exception as e:
+            print(e)

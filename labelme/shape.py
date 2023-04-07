@@ -317,3 +317,153 @@ class Shape(object):
 
     def __setitem__(self, key, value):
         self.points[key] = value
+
+
+DEFAULT_NEG_VERTEX_FILL_COLOR = QtGui.QColor(255, 0, 0, 255)
+
+class MultipoinstShape(object):
+
+    # Render handles as squares
+    P_SQUARE = 0
+
+    # Render handles as circles
+    P_ROUND = 1
+
+    # Flag for the handles we would move if dragging
+    MOVE_VERTEX = 0
+
+    # Flag for all other handles on the curent shape
+    NEAR_VERTEX = 1
+
+    # The following class variables influence the drawing of all shape objects.
+    positive_vertex_fill_color = DEFAULT_VERTEX_FILL_COLOR
+    negative_vertex_fill_color = DEFAULT_NEG_VERTEX_FILL_COLOR
+    hvertex_fill_color = DEFAULT_HVERTEX_FILL_COLOR
+    point_type = P_ROUND
+    point_size = 8
+    scale = 1.0
+
+    def __init__(
+        self,
+    ):
+        self.points = []
+        self.labels = []
+        self.selected = False
+        self.other_data = {}
+
+        # self._highlightIndex = None
+        # self._highlightMode = self.NEAR_VERTEX
+        # self._highlightSettings = {
+        #     self.NEAR_VERTEX: (4, self.P_ROUND),
+        #     self.MOVE_VERTEX: (1.5, self.P_SQUARE),
+        # }
+
+        self._closed = False
+        self.shape_type = 'multipoints'
+
+    def close(self):
+        self._closed = True
+
+    def addPoint(self, point, is_positive=True):
+        if not self.points or point != self.points[0]:
+            self.points.append(point)
+            self.labels.append(is_positive)
+
+    def canAddPoint(self):
+        return True
+
+    def popPoint(self):
+        if self.points:
+            self.labels.pop()
+            return self.points.pop()
+        return None
+
+    def removePoint(self, i):
+
+        if len(self.points) <= 1:
+            logger.warning(
+                "Cannot remove point from: shape_type=%r, len(points)=%d",
+                self.shape_type,
+                len(self.points),
+            )
+            return
+        self.labels.pop(i)
+        self.points.pop(i)
+
+    def isClosed(self):
+        return self._closed
+
+    def setOpen(self):
+        self._closed = False
+
+
+    def paint(self, painter):
+        if self.points:
+            pos_pen = QtGui.QPen(self.positive_vertex_fill_color)
+            neg_pen = QtGui.QPen(self.negative_vertex_fill_color)
+            # Try using integer sizes for smoother drawing(?)
+            pos_pen.setWidth(max(1, int(round(2.0 / self.scale))))
+            neg_pen.setWidth(max(1, int(round(2.0 / self.scale))))
+            for i, (point, is_positive) in enumerate(zip(self.points, self.labels)):
+                if is_positive:
+                    painter.setPen(pos_pen)
+                else:
+                    painter.setPen(neg_pen)
+                painter.drawPoint(point)
+
+
+    def nearestVertex(self, point, epsilon):
+        min_distance = float("inf")
+        min_i = None
+        for i, p in enumerate(self.points):
+            dist = labelme.utils.distance(p - point)
+            if dist <= epsilon and dist < min_distance:
+                min_distance = dist
+                min_i = i
+        return min_i
+
+    def containsPoint(self, point):
+        return self.makePath().contains(point)
+
+    def makePath(self):
+        path = QtGui.QPainterPath(self.points[0])
+        for p in self.points[1:]:
+            path.lineTo(p)
+        return path
+
+    def boundingRect(self):
+        return self.makePath().boundingRect()
+
+    def moveBy(self, offset):
+        self.points = [p + offset for p in self.points]
+
+    def moveVertexBy(self, i, offset):
+        self.points[i] = self.points[i] + offset
+
+    # def highlightVertex(self, i, action):
+    #     """Highlight a vertex appropriately based on the current action
+
+    #     Args:
+    #         i (int): The vertex index
+    #         action (int): The action
+    #         (see Shape.NEAR_VERTEX and Shape.MOVE_VERTEX)
+    #     """
+    #     self._highlightIndex = i
+    #     self._highlightMode = action
+
+    def highlightClear(self):
+        """Clear the highlighted point"""
+        # self._highlightIndex = None
+        pass
+
+    def copy(self):
+        return copy.deepcopy(self)
+
+    def __len__(self):
+        return len(self.points)
+
+    def __getitem__(self, key):
+        return self.points[key]
+
+    def __setitem__(self, key, value):
+        self.points[key] = value

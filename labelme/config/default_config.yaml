@@ -75,6 +75,7 @@ canvas:
     line: false
     point: false
     linestrip: false
+    polygonSAM: false
 
 shortcuts:
   close: Ctrl+W
