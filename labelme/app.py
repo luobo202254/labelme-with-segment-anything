@@ -173,6 +173,7 @@ class MainWindow(QtWidgets.QMainWindow):
             double_click=self._config["canvas"]["double_click"],
             num_backups=self._config["canvas"]["num_backups"],
             crosshair=self._config["canvas"]["crosshair"],
+            sam=self._config["sam"]
         )
         self.canvas.zoomRequest.connect(self.zoomRequest)
 
@@ -2108,14 +2109,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def segmentAnything(self,):
         try:
-            import segment_anything
-            import appdirs
-            import torch
-            cachedir = appdirs.user_cache_dir(__appname__)
-            os.makedirs(cachedir, exist_ok=True)
-            if not os.path.isfile(os.path.join(cachedir, "vit-h-sam.pth")):
-                torch.hub.download_url_to_file("https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth", os.path.join(cachedir, "vit-h-sam.pth"))
             self.toggleDrawMode(False, createMode="polygonSAM")
-            self.canvas.loadSamPredictor("default", "cuda", os.path.join(cachedir, "vit-h-sam.pth"))
-        except Exception as e:
+            self.canvas.loadSamPredictor()
+        except ImportError as e:
             print(e)

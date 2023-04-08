@@ -399,6 +399,8 @@ class MultipoinstShape(object):
 
     def paint(self, painter):
         if self.points:
+            d = self.point_size / self.scale
+            shape = self.point_type
             pos_pen = QtGui.QPen(self.positive_vertex_fill_color)
             neg_pen = QtGui.QPen(self.negative_vertex_fill_color)
             # Try using integer sizes for smoother drawing(?)
@@ -409,7 +411,13 @@ class MultipoinstShape(object):
                     painter.setPen(pos_pen)
                 else:
                     painter.setPen(neg_pen)
-                painter.drawPoint(point)
+
+                if shape == self.P_SQUARE:
+                    painter.drawRect(point.x() - d / 2, point.y() - d / 2, d, d)
+                elif shape == self.P_ROUND:
+                    painter.drawEllipse(point, d / 2.0, d / 2.0)
+                else:
+                    assert False, "unsupported vertex shape"
 
 
     def nearestVertex(self, point, epsilon):

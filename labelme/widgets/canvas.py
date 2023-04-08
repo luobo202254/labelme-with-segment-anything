@@ -5,10 +5,11 @@ from qtpy import QtWidgets
 from labelme import QT5
 from labelme.shape import Shape, MultipoinstShape
 import labelme.utils
-from segment_anything import sam_model_registry, SamPredictor
 import numpy as np
 import time
 import cv2
+import appdirs
+import os
 
 # TODO(unknown):
 # - [maybe] Find optimal epsilon value.
@@ -61,6 +62,15 @@ class Canvas(QtWidgets.QWidget):
                 "linestrip": False,
                 "polygonSAM": False,
             },
+        )
+        self.sam_config = kwargs.pop(
+            "sam",
+            {
+                "maxside": 2048,
+                "approxpoly_epsilon": 0.5,
+                "weights": "vit-h",
+                "device": "cuda"
+            }
         )
         super(Canvas, self).__init__(*args, **kwargs)
         # Initialise local state.
@@ -129,37 +139,55 @@ class Canvas(QtWidgets.QWidget):
             raise ValueError("Unsupported createMode: %s" % value)
         self._createMode = value
         self.sam_shape = None
+        self.current = None
 
-    def loadSamPredictor(self, model_type, device, weight_path):
-        if self.sam_predictor:
-            del self.sam_predictor
-        sam = sam_model_registry[model_type](checkpoint=weight_path)
-        sam.to(device=device)
-        self.sam_predictor = SamPredictor(sam)
+    def loadSamPredictor(self,):
+        if not self.sam_predictor:
+            import torch
+            from segment_anything import sam_model_registry, SamPredictor
+            cachedir = appdirs.user_cache_dir("labelme")
+            os.makedirs(cachedir, exist_ok=True)
+            weight_file = os.path.join(cachedir, self.sam_config["weights"] + ".pth")
+            weight_urls = {
+                "vit_h": "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth",
+                "vit_l": "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_l_0b3195.pth",
+                "vit_b": "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth"
+            }
+            if not os.path.isfile(weight_file):
+                torch.hub.download_url_to_file(weight_urls[self.sam_config["weights"]], weight_file)
+            sam = sam_model_registry[self.sam_config["weights"]](checkpoint=weight_file)
+            if self.sam_config["device"] == "cuda" and torch.cuda.is_available():
+                sam.to(device="cuda")
+            self.sam_predictor = SamPredictor(sam)
         self.samEmbedding()
 
     def samEmbedding(self,):
-        image = self.pixmap.toImage()
+        image = self.pixmap.toImage().copy()
         img_size = image.size()
-        b = image.bits()
-        b.setsize(img_size.height() * img_size.width() * image.depth()//8)
-        image = np.frombuffer(b, np.uint8).reshape([img_size.height(), img_size.width(),image.depth()//8])
-        image = image[:,:,:3]
+        s = image.bits().asstring(img_size.height() * img_size.width() * image.depth()//8)
+        image = np.frombuffer(s, dtype=np.uint8).reshape([img_size.height(), img_size.width(),image.depth()//8])
+        image = image[:,:,:3].copy()
+        h, w, _ = image.shape
+        self.sam_image_scale = self.sam_config["maxside"] / max(h, w)
+        self.sam_image_scale = min(1, self.sam_image_scale)
+        image = cv2.resize(image, None, fx=self.sam_image_scale, fy=self.sam_image_scale, interpolation=cv2.INTER_LINEAR)
         self.sam_predictor.set_image(image)
         self.update()
 
     def samPrompt(self, points, labels):
         self.sam_shape = None
-        masks, scores, logits = self.sam_predictor.predict(point_coords=points, point_labels=labels, multimask_output=True)
+        masks, scores, logits = self.sam_predictor.predict(point_coords=points*self.sam_image_scale, point_labels=labels, multimask_output=True)
         mask = masks[np.argmax(scores), :, :]
         contours, hierarchy = cv2.findContours((mask*255).astype(np.uint8), cv2.RETR_CCOMP, cv2.CHAIN_APPROX_NONE)
         final_contour = None
+        contours = sorted(contours, key=lambda x: len(x), reverse=True)
+        contours = contours[:10]
         for contour in contours:
-            if len(contour) < 10:
+            if final_contour is not None and len(contour) < 10/self.sam_image_scale:
                 continue
-            epsilon = 0.5
+            epsilon = self.sam_config["approxpoly_epsilon"]
             contour = cv2.approxPolyDP(contour,epsilon,True)
-            contour = contour[:,0,:]
+            contour = contour[:,0,:] / self.sam_image_scale
             contour = np.concatenate([contour, contour[:1,:]], axis=0)
             if final_contour is not None:
                 final_contour = np.concatenate([final_contour[:2,:], contour, final_contour[1:,:]], axis=0)
@@ -478,6 +506,9 @@ class Canvas(QtWidgets.QWidget):
             if self.drawing() and self.createMode == "polygonSAM":
                 if self.current:
                     self.current.addPoint(self.line[1], False)
+                    points = [[point.x(), point.y()] for point in self.current.points]
+                    labels = [int(label) for label in self.current.labels]
+                    self.samPrompt(np.array(points), np.array(labels))
                     if int(ev.modifiers()) == QtCore.Qt.ControlModifier:
                         self.finalise()
                 elif not self.outOfPixmap(pos):
@@ -736,6 +767,7 @@ class Canvas(QtWidgets.QWidget):
             )
 
         Shape.scale = self.scale
+        MultipoinstShape.scale = self.scale
         for shape in self.shapes:
             if (shape.selected or not self._hideBackround) and self.isVisible(
                 shape
@@ -762,7 +794,15 @@ class Canvas(QtWidgets.QWidget):
             drawing_shape.addPoint(self.line[1])
             drawing_shape.fill = True
             drawing_shape.paint(p)
-
+        if (
+            self.fillDrawing()
+            and self.createMode == "polygonSAM"
+            and self.sam_shape is not None
+            and len(self.sam_shape.points) >= 2
+        ):
+            drawing_shape = self.sam_shape.copy()
+            drawing_shape.fill = True
+            drawing_shape.paint(p)
         p.end()
 
     def transformPos(self, point):
@@ -980,9 +1020,7 @@ class Canvas(QtWidgets.QWidget):
         if clear_shapes:
             self.shapes = []
 
-        if self.createMode == "polygonSAM" and self.pixmap:
-            while not self.sam_predictor:
-                time.sleep(1)
+        if self.createMode == "polygonSAM" and self.pixmap and self.sam_predictor:
             self.samEmbedding()
         self.update()
 
