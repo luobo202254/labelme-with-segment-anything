@@ -1,5 +1,7 @@
 import copy
 import math
+import numpy as np
+import cv2
 
 from qtpy import QtCore
 from qtpy import QtGui
@@ -475,3 +477,86 @@ class MultipoinstShape(object):
 
     def __setitem__(self, key, value):
         self.points[key] = value
+
+
+class MaskShape(object):
+    mask_color = np.array([0, 0, 255, 64], np.uint8)
+    boundary_color = np.array([0, 0, 255, 128], np.uint8)
+    def __init__(self, label=None, group_id=None, flags=None, description=None):
+        self.label = label
+        self.group_id = group_id
+        self.fill = False
+        self.selected = False
+        self.flags = flags
+        self.description = description
+        self.other_data = {}
+        self.rgba_mask = None
+        self.mask = None
+        self.logits = None
+        self.scale = 1
+
+    def setScaleMask(self, scale, mask):
+        self.scale = scale
+        self.mask = mask
+
+    def getQImageMask(self,):
+        if self.mask is None:
+            return None
+        mask = (self.mask * 255).astype(np.uint8)
+        mask = cv2.resize(mask, None, fx=1/self.scale, fy=1/self.scale, interpolation=cv2.INTER_NEAREST)
+        if self.rgba_mask is not None and mask.shape[0] == self.rgba_mask.shape[0] and mask.shape[1] == self.rgba_mask.shape[1]:
+            self.rgba_mask[:] = 0
+        else:
+            self.rgba_mask = np.zeros([mask.shape[0], mask.shape[1], 4], dtype=np.uint8)
+        self.rgba_mask[mask > 128] = self.mask_color
+        kernel = np.ones([5,5], dtype=np.uint8)
+        bound = mask - cv2.erode(mask, kernel, iterations=1)
+        self.rgba_mask[bound>128] = self.boundary_color
+        qimage = QtGui.QImage(self.rgba_mask.data, self.rgba_mask.shape[1], self.rgba_mask.shape[0], QtGui.QImage.Format_RGBA8888)
+        return qimage
+
+    def paint(self, painter):
+        qimage = self.getQImageMask()
+
+        # qimage = None
+        if qimage is not None:
+            # image = self.pixmap.toImage().copy()
+            # img_size = image.size()
+            # s = image.bits().asstring(img_size.height() * img_size.width() * image.depth()//8)
+            # image = np.frombuffer(s, dtype=np.uint8).reshape([img_size.height(), img_size.width(),image.depth()//8])
+            # cv2.imwrite('test.png', image)
+            painter.drawImage(QtCore.QPoint(0, 0), qimage)
+
+    def toPolygons(self, epsilon):
+        contours, hierarchy = cv2.findContours((self.mask*255).astype(np.uint8), cv2.RETR_CCOMP, cv2.CHAIN_APPROX_NONE)
+        shapes = []
+        if len(contours) == 0:
+            return shapes
+        current_idx = 0
+        while current_idx != -1:
+            next_idx, _, child_current_idx, _ = hierarchy[0][current_idx]
+            contour = contours[current_idx]
+            contour = cv2.approxPolyDP(contour,epsilon,True)
+            contour = contour[:,0,:] / self.scale
+            contour = np.concatenate([contour, contour[:1,:]], axis=0)
+            while child_current_idx != -1:
+                child_next_idx, _, _, _ = hierarchy[0][child_current_idx]
+                child_contour = contours[child_current_idx]
+                if len(child_contour) >= 10 / self.scale:
+                    child_contour = cv2.approxPolyDP(child_contour,epsilon,True)
+                    child_contour = child_contour[:,0,:] / self.scale
+                    child_contour = np.concatenate([child_contour, child_contour[:1,:]], axis=0)
+                    contour = np.concatenate([contour[:2,:], child_contour, contour[1:,:]], axis=0)
+                child_current_idx = child_next_idx
+            current_idx = next_idx
+            if len(contour) < 5:
+                continue
+            shape = Shape(shape_type="polygon", label=self.label, group_id=self.group_id, flags=self.flags, description=self.description)
+            for x, y in contour:
+                shape.addPoint(QtCore.QPointF(x, y))
+            shapes.append(shape)
+
+        return shapes
+
+    def copy(self):
+        return copy.deepcopy(self)

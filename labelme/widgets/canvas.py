@@ -3,7 +3,7 @@ from qtpy import QtGui
 from qtpy import QtWidgets
 
 from labelme import QT5
-from labelme.shape import Shape, MultipoinstShape
+from labelme.shape import Shape, MultipoinstShape, MaskShape
 import labelme.utils
 import numpy as np
 import time
@@ -113,7 +113,7 @@ class Canvas(QtWidgets.QWidget):
         self.setMouseTracking(True)
         self.setFocusPolicy(QtCore.Qt.WheelFocus)
         self.sam_predictor = None
-        self.sam_shape = None
+        self.sam_mask = MaskShape()
 
     def fillDrawing(self):
         return self._fill_drawing
@@ -138,7 +138,7 @@ class Canvas(QtWidgets.QWidget):
         ]:
             raise ValueError("Unsupported createMode: %s" % value)
         self._createMode = value
-        self.sam_shape = None
+        self.sam_mask = MaskShape()
         self.current = None
 
     def loadSamPredictor(self,):
@@ -175,29 +175,15 @@ class Canvas(QtWidgets.QWidget):
         self.update()
 
     def samPrompt(self, points, labels):
-        self.sam_shape = None
-        masks, scores, logits = self.sam_predictor.predict(point_coords=points*self.sam_image_scale, point_labels=labels, multimask_output=True)
+        masks, scores, logits = self.sam_predictor.predict(
+            point_coords=points*self.sam_image_scale,
+            point_labels=labels,
+            mask_input=self.sam_mask.logits[None,:,:] if self.sam_mask.logits is not None else None,
+            multimask_output=False
+        )
+        self.sam_mask.logits = logits[np.argmax(scores), :, :]
         mask = masks[np.argmax(scores), :, :]
-        contours, hierarchy = cv2.findContours((mask*255).astype(np.uint8), cv2.RETR_CCOMP, cv2.CHAIN_APPROX_NONE)
-        final_contour = None
-        contours = sorted(contours, key=lambda x: len(x), reverse=True)
-        contours = contours[:10]
-        for contour in contours:
-            if final_contour is not None and len(contour) < 10/self.sam_image_scale:
-                continue
-            epsilon = self.sam_config["approxpoly_epsilon"]
-            contour = cv2.approxPolyDP(contour,epsilon,True)
-            contour = contour[:,0,:] / self.sam_image_scale
-            contour = np.concatenate([contour, contour[:1,:]], axis=0)
-            if final_contour is not None:
-                final_contour = np.concatenate([final_contour[:2,:], contour, final_contour[1:,:]], axis=0)
-            else:
-                final_contour = contour
-        if final_contour is not None:
-            shape = Shape(shape_type="polygon")
-            for x, y in final_contour:
-                shape.addPoint(QtCore.QPointF(x, y))
-            self.sam_shape = shape
+        self.sam_mask.setScaleMask(self.sam_image_scale, mask)
 
     def storeShapes(self):
         shapesBackup = []
@@ -744,6 +730,7 @@ class Canvas(QtWidgets.QWidget):
         p.translate(self.offsetToCenter())
 
         p.drawPixmap(0, 0, self.pixmap)
+        self.sam_mask.paint(p)
 
         # draw crosshair
         if (
@@ -778,8 +765,6 @@ class Canvas(QtWidgets.QWidget):
             self.current.paint(p)
             self.line.paint(p)
 
-        if self.sam_shape:
-            self.sam_shape.paint(p)
         if self.selectedShapesCopy:
             for s in self.selectedShapesCopy:
                 s.paint(p)
@@ -792,15 +777,6 @@ class Canvas(QtWidgets.QWidget):
         ):
             drawing_shape = self.current.copy()
             drawing_shape.addPoint(self.line[1])
-            drawing_shape.fill = True
-            drawing_shape.paint(p)
-        if (
-            self.fillDrawing()
-            and self.createMode == "polygonSAM"
-            and self.sam_shape is not None
-            and len(self.sam_shape.points) >= 2
-        ):
-            drawing_shape = self.sam_shape.copy()
             drawing_shape.fill = True
             drawing_shape.paint(p)
         p.end()
@@ -826,11 +802,11 @@ class Canvas(QtWidgets.QWidget):
         assert self.current
         self.current.close()
         if self.createMode == 'polygonSAM':
-            self.shapes.append(self.sam_shape)
+            self.shapes.append(self.sam_mask)
         else:
             self.shapes.append(self.current)
         self.storeShapes()
-        self.sam_shape = None
+        self.sam_mask = MaskShape()
         self.current = None
         self.setHiding(False)
         self.newShape.emit()
@@ -988,9 +964,18 @@ class Canvas(QtWidgets.QWidget):
         assert text
         self.shapes[-1].label = text
         self.shapes[-1].flags = flags
+        polygons = None
+        if isinstance(self.shapes[-1], MaskShape):
+            mask_shape = self.shapes.pop()
+            polygons = mask_shape.toPolygons(self.sam_config["approxpoly_epsilon"])
+            self.shapes.extend(polygons)
         self.shapesBackups.pop()
         self.storeShapes()
-        return self.shapes[-1]
+
+        if isinstance(polygons, list):
+            return polygons
+        else:
+            return self.shapes[-1:]
 
     def undoLastLine(self):
         assert self.shapes
@@ -1019,6 +1004,8 @@ class Canvas(QtWidgets.QWidget):
         self.pixmap = pixmap
         if clear_shapes:
             self.shapes = []
+            self.sam_mask = MaskShape()
+            self.current = None
 
         if self.createMode == "polygonSAM" and self.pixmap and self.sam_predictor:
             self.samEmbedding()
@@ -1032,7 +1019,7 @@ class Canvas(QtWidgets.QWidget):
             self.shapes.extend(shapes)
         self.storeShapes()
         self.current = None
-        self.sam_shape = None
+        self.sam_mask = MaskShape()
         self.hShape = None
         self.hVertex = None
         self.hEdge = None

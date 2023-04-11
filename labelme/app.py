@@ -1218,6 +1218,7 @@ class MainWindow(QtWidgets.QMainWindow):
             item = self.labelList.findItemByShape(shape)
             self.labelList.removeItem(item)
 
+
     def loadShapes(self, shapes, replace=True):
         self._noSelectionSlot = True
         for shape in shapes:
@@ -1392,10 +1393,11 @@ class MainWindow(QtWidgets.QMainWindow):
             text = ""
         if text:
             self.labelList.clearSelection()
-            shape = self.canvas.setLastLabel(text, flags)
-            shape.group_id = group_id
-            shape.description = description
-            self.addLabel(shape)
+            shapes = self.canvas.setLastLabel(text, flags)
+            for shape in shapes:
+                shape.group_id = group_id
+                shape.description = description
+                self.addLabel(shape)
             self.actions.editMode.setEnabled(True)
             self.actions.undoLastPoint.setEnabled(False)
             self.actions.undo.setEnabled(True)

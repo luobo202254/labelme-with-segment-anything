@@ -35,7 +35,7 @@ def get_install_requires():
         "opencv-python-headless",
         "torchvision>=0.8",
         "appdirs",
-        "segment-anything @ git+https://github.com/facebookresearch/segment-anything.git"
+        "segment-anything @ git+https://github.com/facebookresearch/segment-anything.git",
     ]
 
     # Find python binding for qt with priority:
