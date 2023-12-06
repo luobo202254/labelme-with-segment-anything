@@ -144,14 +144,14 @@ class Canvas(QtWidgets.QWidget):
     def loadSamPredictor(self,):
         if not self.sam_predictor:
             import torch
-            from segment_anything import sam_model_registry, SamPredictor
+            from segment_anything_hq import sam_model_registry, SamPredictor
             cachedir = appdirs.user_cache_dir("labelme")
             os.makedirs(cachedir, exist_ok=True)
             weight_file = os.path.join(cachedir, self.sam_config["weights"] + ".pth")
             weight_urls = {
-                "vit_h": "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth",
-                "vit_l": "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_l_0b3195.pth",
-                "vit_b": "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth"
+                "vit_h": "https://huggingface.co/lkeab/hq-sam/blob/main/sam_hq_vit_h.pth",
+                "vit_l": "https://huggingface.co/lkeab/hq-sam/blob/main/sam_hq_vit_l.pth",
+                "vit_b": "https://huggingface.co/lkeab/hq-sam/blob/main/sam_hq_vit_b.pth"
             }
             if not os.path.isfile(weight_file):
                 torch.hub.download_url_to_file(weight_urls[self.sam_config["weights"]], weight_file)
@@ -980,11 +980,12 @@ class Canvas(QtWidgets.QWidget):
     def undoLastLine(self):
         assert self.shapes
         self.current = self.shapes.pop()
-        self.current.setOpen()
         if self.createMode in ["polygon", "linestrip"]:
             self.line.points = [self.current[-1], self.current[0]]
+            self.current.setOpen()
         elif self.createMode in ["rectangle", "line", "circle"]:
             self.current.points = self.current.points[0:1]
+            self.current.setOpen()
         elif self.createMode in ["point", "polygonSAM"]:
             self.current = None
         self.drawingPolygon.emit(True)
